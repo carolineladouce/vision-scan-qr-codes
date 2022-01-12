@@ -9,15 +9,9 @@ import UIKit
 import AVFoundation
 import Vision
 
-class MainViewController: UIViewController {
+class MainViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDelegate {
     
     private let captureSession = AVCaptureSession()
-    
-    private func addCamerInput() {
-        let device = AVCaptureDevice.default(for: .video)!
-        let cameraInput = try! AVCaptureDeviceInput(device: device)
-        self.captureSession.addInput(cameraInput)
-    }
     
     private lazy var previewLayer: AVCaptureVideoPreviewLayer = {
         let preview = AVCaptureVideoPreviewLayer(session: self.captureSession)
@@ -25,9 +19,9 @@ class MainViewController: UIViewController {
         return preview
     }()
     
-    private func addPreviewLayer() {
-        self.view.layer.addSublayer(self.previewLayer)
-    }
+    private let videoOutput = AVCaptureVideoDataOutput()
+    
+    private let sequenceHandler = VNSequenceRequestHandler()
     
     
     override func viewDidLoad() {
@@ -38,9 +32,8 @@ class MainViewController: UIViewController {
         
         self.addCamerInput()
         self.addPreviewLayer()
+        self.addVideoOutput()
         self.captureSession.startRunning()
-        
-        
     }
     
     
@@ -48,6 +41,46 @@ class MainViewController: UIViewController {
         super.viewDidLayoutSubviews()
         self.previewLayer.frame = self.view.bounds
     }
+    
+    
+    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        guard let frame = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+            debugPrint("Unable to get image from sample buffer")
+            return
+        }
+        if let barcode = self.extractQRCode(fromFrame: frame) {
+            print("Barcode extracted: \(barcode)")
+        }
+    }
+    
+    private func addCamerInput() {
+        let device = AVCaptureDevice.default(for: .video)!
+        let cameraInput = try! AVCaptureDeviceInput(device: device)
+        self.captureSession.addInput(cameraInput)
+    }
+    
+    private func addPreviewLayer() {
+        self.view.layer.addSublayer(self.previewLayer)
+    }
+    
+    private func addVideoOutput() {
+        self.videoOutput.videoSettings = [(kCVPixelBufferPixelFormatTypeKey as NSString) : NSNumber(value: kCVPixelFormatType_32BGRA)] as [String : Any]
+        self.videoOutput.setSampleBufferDelegate(self, queue: DispatchQueue(label: "my.image.handling.queue"))
+        self.captureSession.addOutput(self.videoOutput)
+    }
+    
+    private func extractQRCode(fromFrame frame: CVImageBuffer) -> String? {
+        let barcodeRequest = VNDetectBarcodesRequest()
+        barcodeRequest.symbologies = [.qr]
+        try? self.sequenceHandler.perform([barcodeRequest], on: frame)
+        
+        guard let results = barcodeRequest.results, let firstBarcode = results.first?.payloadStringValue else {
+            return nil
+        }
+        
+        return firstBarcode
+    }
+    
     
 }
 
